@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from handlers.find_load import lambda_handler as find_load_handler
 from handlers.pre_shipment import pre_shipment_handler
 from handlers.in_transit import in_transit_handler
+from handlers.pre_pickup import pre_pickup_handler
 from handlers.find_load_utils import map_find_load_payload, safe_get
 
 # Load environment variables
@@ -224,6 +225,37 @@ async def sync_in_transit():
         )
 
 
+@app.post("/sync-pre-pickup")
+@app.get("/sync-pre-pickup")
+async def sync_pre_pickup():
+    """
+    Peach State Pre-Pickup Sync - Triggered by Railway cron every hour.
+    Finds loads with pickup in next 2 hours (status: COVERED) and sends webhooks.
+    """
+    try:
+        # Call pre-pickup handler
+        result = pre_pickup_handler({}, None)
+
+        # Parse body if it's a JSON string (error case)
+        body_content = result.get("body", {})
+        if isinstance(body_content, str):
+            body_content = json.loads(body_content)
+
+        return JSONResponse(
+            status_code=result.get("statusCode", 200),
+            content=body_content
+        )
+
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "statusCode": 500,
+                "error": str(e)
+            }
+        )
+
+
 @app.get("/health")
 async def health():
     """Health check endpoint for monitoring."""
@@ -237,12 +269,13 @@ async def health():
 async def root():
     """Service information and available endpoints."""
     return {
-        "service": "Meiborg Brothers Integrations",
-        "description": "Combined API and scheduled job integration",
+        "service": "Peach State Track & Trace Triggers",
+        "description": "Combined API and scheduled job integration for McLeod TMS",
         "endpoints": {
             "GET /find-load": "Find load API (query params: order_id, status, etc.)",
-            "POST /sync-pre-shipment": "Pre-shipment notifications (~2h before pickup)",
-            "POST /sync-in-transit": "In-transit check-ins (morning/afternoon)",
+            "POST /sync-pre-pickup": "Peach State: Pre-pickup calls (hourly cron)",
+            "POST /sync-pre-shipment": "Legacy: Pre-shipment notifications (~2h before pickup)",
+            "POST /sync-in-transit": "Legacy: In-transit check-ins (morning/afternoon)",
             "GET /health": "Health check"
         }
     }
