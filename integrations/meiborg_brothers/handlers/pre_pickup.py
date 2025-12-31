@@ -6,6 +6,7 @@ sends webhook to trigger pre-pickup calls.
 
 import json
 import os
+import re
 from typing import Dict, Any, List
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -149,13 +150,17 @@ def process_order(order: Dict[str, Any], webhook_url: str) -> Dict[str, Any]:
         if has_been_called(order_id):
             return {"order_id": order_id, "success": False, "reason": "already_called"}
 
+        # Clean phone numbers - remove all non-digit characters
+        driver_phone_clean = re.sub(r'\D', '', driver_phone) if driver_phone else None
+        dispatch_phone_clean = re.sub(r'\D', '', dispatch_phone) if dispatch_phone else None
+
         # Build webhook payload
         payload = {
             "order_id": order_id,
             "movement_id": order.get("curr_movement_id"),
-            "driver_phone": driver_phone.replace("-", "").replace(" ", "") if driver_phone else None,
-            "dispatch_phone": dispatch_phone.replace("-", "").replace(" ", "") if dispatch_phone else None,
-            "carrier_name": movement.get("carrier_id"),
+            "driver_phone": driver_phone_clean,
+            "dispatch_phone": dispatch_phone_clean,
+            "carrier_name": movement.get("carrier_contact"),  # Use carrier_contact for full carrier name
             "carrier_tractor": movement.get("carrier_tractor"),
             "carrier_trailer": movement.get("carrier_trailer"),
             "scheduled_pickup_time": pickup_time.isoformat(),
