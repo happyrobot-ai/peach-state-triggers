@@ -154,6 +154,9 @@ def process_order(order: Dict[str, Any], webhook_url: str) -> Dict[str, Any]:
         driver_phone_clean = re.sub(r'\D', '', driver_phone) if driver_phone else None
         dispatch_phone_clean = re.sub(r'\D', '', dispatch_phone) if dispatch_phone else None
 
+        # Get delivery location (last stop)
+        last_stop = stops[-1] if len(stops) > 1 else {}
+
         # Build webhook payload
         payload = {
             "order_id": order_id,
@@ -170,6 +173,12 @@ def process_order(order: Dict[str, Any], webhook_url: str) -> Dict[str, Any]:
                 "zip": first_stop.get("zip_code") or first_stop.get("zip"),
                 "address": first_stop.get("address")
             },
+            "delivery_location": {
+                "city": last_stop.get("city_name") or last_stop.get("city"),
+                "state": last_stop.get("state"),
+                "zip": last_stop.get("zip_code") or last_stop.get("zip"),
+                "address": last_stop.get("address")
+            } if last_stop else None,
             "source": "peach_state_pre_pickup",
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
