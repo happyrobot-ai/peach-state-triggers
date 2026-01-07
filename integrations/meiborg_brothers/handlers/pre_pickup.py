@@ -46,8 +46,9 @@ def fetch_orders_in_window(
     Returns:
         List of order objects
     """
-    # Calculate time window
-    now = datetime.now()
+    # Calculate time window - use Central Time for McLeod queries
+    central_tz = ZoneInfo("America/Chicago")
+    now = datetime.now(central_tz)
     end_time = now + timedelta(hours=hours_ahead)
 
     # Format as McLeod expects: YYYYMMDDHHmmss
