@@ -61,9 +61,14 @@ def fetch_orders_in_window(
     start_time = now - timedelta(hours=hours_behind)
     end_time = now + timedelta(hours=hours_ahead)
 
-    # Format as McLeod expects: YYYYMMDDHHmmss
-    start_param = start_time.strftime('%Y%m%d%H%M%S')
-    end_param = end_time.strftime('%Y%m%d%H%M%S')
+    # Format as McLeod expects: YYYYMMDDHHmmss with timezone offset
+    # McLeod requires the timezone offset (e.g., -0500 for EST, -0600 for CST)
+    # Get the UTC offset in format +/-HHMM
+    start_offset = start_time.strftime('%z')  # e.g., -0500
+    end_offset = end_time.strftime('%z')
+    
+    start_param = start_time.strftime('%Y%m%d%H%M%S') + start_offset
+    end_param = end_time.strftime('%Y%m%d%H%M%S') + end_offset
 
     # Build query
     endpoint = f"/ws/orders/search?shipper.sched_arrive_early=>={start_param}&shipper.sched_arrive_early=<{end_param}"
