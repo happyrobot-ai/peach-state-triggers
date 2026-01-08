@@ -31,28 +31,38 @@ def fetch_orders_in_window(
     auth_token: str,
     token_type: str,
     company_id: str,
-    hours_ahead: int = 2
+    hours_behind: int = 3,
+    hours_ahead: int = 6
 ) -> List[Dict[str, Any]]:
     """
-    Fetch orders from McLeod with pickup in the next X hours.
+    Fetch orders from McLeod with pickup in a wide time window.
+    
+    To handle timezone differences, we query a wide window:
+    - hours_behind: Query backward to catch loads in earlier timezones (PST/MST)
+    - hours_ahead: Query forward to catch loads in later timezones or ahead in same TZ
 
     Args:
         base_url: McLeod API base URL
         auth_token: Auth token
         token_type: Auth type (Bearer, etc.)
         company_id: Company ID for header
-        hours_ahead: How many hours ahead to query (default: 2)
+        hours_behind: How many hours before now to query (default: 3 for PST offset)
+        hours_ahead: How many hours ahead to query (default: 6)
 
     Returns:
         List of order objects
     """
-    # Calculate time window - use Central Time for McLeod queries
-    central_tz = ZoneInfo("America/Chicago")
-    now = datetime.now(central_tz)
+    # Calculate time window - use Eastern Time for McLeod queries
+    eastern_tz = ZoneInfo("America/New_York")
+    now = datetime.now(eastern_tz)
+    
+    # Query backward to catch loads in earlier timezones (e.g., PST)
+    # A load at 12 PM PST appears as "120000" but equals 3 PM EST
+    start_time = now - timedelta(hours=hours_behind)
     end_time = now + timedelta(hours=hours_ahead)
 
     # Format as McLeod expects: YYYYMMDDHHmmss
-    start_param = now.strftime('%Y%m%d%H%M%S')
+    start_param = start_time.strftime('%Y%m%d%H%M%S')
     end_param = end_time.strftime('%Y%m%d%H%M%S')
 
     # Build query
@@ -87,6 +97,56 @@ def fetch_orders_in_window(
     except Exception as e:
         print(f"ERROR: Failed to fetch orders from McLeod: {e}")
         return []
+
+
+def filter_orders_by_actual_window(orders: List[Dict[str, Any]], hours_ahead: int = 2) -> List[Dict[str, Any]]:
+    """
+    Filter orders to those actually in the next X hours, timezone-aware.
+    
+    Args:
+        orders: List of McLeod order objects
+        hours_ahead: How many hours ahead to include (default: 2)
+    
+    Returns:
+        Filtered list of orders with pickups in the specified time window
+    """
+    # Use Eastern Time as base since client is EST-based
+    eastern_tz = ZoneInfo("America/New_York")
+    now = datetime.now(eastern_tz)
+    end_time = now + timedelta(hours=hours_ahead)
+    
+    filtered = []
+    for order in orders:
+        try:
+            stops = order.get("stops", [])
+            if not stops:
+                continue
+                
+            first_stop = stops[0]
+            sched_arrive = first_stop.get("sched_arrive_early")
+            if not sched_arrive:
+                continue
+            
+            # Parse with timezone from the stop's __timezone field
+            tz_abbr = first_stop.get("__timezone")
+            tz_str = TIMEZONE_MAPPING.get(tz_abbr, "America/New_York")
+            
+            # Extract datetime part (before + or -)
+            dt_part = sched_arrive.split("+")[0] if "+" in sched_arrive else sched_arrive.split("-")[0]
+            pickup_time = datetime.strptime(dt_part, "%Y%m%d%H%M%S").replace(tzinfo=ZoneInfo(tz_str))
+            
+            # Convert to Eastern Time for comparison
+            pickup_eastern = pickup_time.astimezone(eastern_tz)
+            
+            # Only include if pickup is within our desired window
+            if now <= pickup_eastern < end_time:
+                filtered.append(order)
+                
+        except Exception as e:
+            print(f"Warning: Error filtering order {order.get('id', 'unknown')}: {e}")
+            continue
+    
+    return filtered
 
 
 def process_order(order: Dict[str, Any], webhook_url: str) -> Dict[str, Any]:
@@ -126,7 +186,7 @@ def process_order(order: Dict[str, Any], webhook_url: str) -> Dict[str, Any]:
 
         # Parse pickup time
         tz_abbr = first_stop.get("__timezone")
-        tz_str = TIMEZONE_MAPPING.get(tz_abbr) if tz_abbr else "America/Chicago"
+        tz_str = TIMEZONE_MAPPING.get(tz_abbr) if tz_abbr else "America/New_York"
 
         dt_part = sched_arrive_early.split("+")[0] if "+" in sched_arrive_early else sched_arrive_early.split("-")[0]
         pickup_time = datetime.strptime(dt_part, "%Y%m%d%H%M%S").replace(tzinfo=ZoneInfo(tz_str))
@@ -240,11 +300,17 @@ def pre_pickup_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "body": json.dumps({"error": "PRE_PICKUP_WEBHOOK_URL required"})
             }
 
-        # Fetch orders from McLeod
-        print(f"Fetching orders with pickup in next 2 hours...")
-        orders = fetch_orders_in_window(base_url, auth_token, token_type, company_id, hours_ahead=2)
+        # Fetch orders from McLeod - query wider window to handle timezone differences
+        # Query 3 hours back to catch earlier timezones (PST) and 6 hours ahead
+        print(f"Fetching orders with pickup in wide time window (3 hours back + 6 hours ahead)...")
+        orders = fetch_orders_in_window(base_url, auth_token, token_type, company_id, hours_behind=3, hours_ahead=6)
 
-        print(f"Found {len(orders)} orders in time window")
+        print(f"Found {len(orders)} orders in wide time window")
+        
+        # Filter to actual 2-hour window using timezone-aware logic
+        orders = filter_orders_by_actual_window(orders, hours_ahead=2)
+        
+        print(f"After timezone-aware filtering: {len(orders)} orders in next 2 hours")
 
         # Process each order
         results = []
