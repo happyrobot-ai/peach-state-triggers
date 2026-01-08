@@ -143,8 +143,9 @@ def filter_orders_by_actual_window(orders: List[Dict[str, Any]], hours_ahead: in
             # Convert to Eastern Time for comparison
             pickup_eastern = pickup_time.astimezone(eastern_tz)
             
-            # Only include if pickup is within our desired window
-            if now <= pickup_eastern < end_time:
+            # Only include if pickup is within our desired window (inclusive of end_time)
+            # Using <= to include loads exactly 2 hours away
+            if now <= pickup_eastern <= end_time:
                 filtered.append(order)
                 
         except Exception as e:
